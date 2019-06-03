@@ -46,25 +46,57 @@ namespace InterfaceDynamicEnhancement
             constructorIlo.Emit(OpCodes.Ret);
 
             var methodsOfT = typeof(T).GetMethods();
-
+            var methodsOfT2 = typeof(T2).GetMethods();
             foreach (var oneMethod in methodsOfT)
             {
+                CreateProxyMethod<T2>(oneMethod, typeBuilder, coreObjectFiled);
+            }
+
+            foreach (var oneMethod in methodsOfT2)
+            {
+                var appendObjectType = appendObject.GetType();
                 var methodParameterTypes = oneMethod.GetParameters().Select(k => k.ParameterType).ToArray();
-                var methodBuilder = typeBuilder.DefineMethod(oneMethod.Name, MethodAttributes.Public|MethodAttributes.Virtual, CallingConventions.Standard, oneMethod.ReturnType, methodParameterTypes);
+                var appendObjectMethod = appendObjectType.GetMethod(oneMethod.Name, methodParameterTypes);
+                if (appendObjectMethod == null || appendObjectMethod.ReturnType != oneMethod.ReturnType)
+                {
+                    continue;
+                }
+
+                var methodBuilder = typeBuilder.DefineMethod(oneMethod.Name, MethodAttributes.Public | MethodAttributes.Virtual,
+                    CallingConventions.Standard, oneMethod.ReturnType, methodParameterTypes);
                 var methodIlo = methodBuilder.GetILGenerator();
                 methodIlo.Emit(OpCodes.Ldarg_0);
-                methodIlo.Emit(OpCodes.Ldfld, coreObjectFiled);
+                methodIlo.Emit(OpCodes.Ldfld, appendObjectFiled);
                 for (int i = 0; i < methodParameterTypes.Length; i++)
                 {
                     methodIlo.Emit(OpCodes.Ldarg_S, i + 1);
                 }
-                methodIlo.Emit(OpCodes.Call, oneMethod);
+
+                methodIlo.Emit(OpCodes.Call, appendObjectMethod);
                 methodIlo.Emit(OpCodes.Ret);
             }
 
             var t = typeBuilder.CreateType();
             var res = (T2)Activator.CreateInstance(t, coreObject, appendObject);
             return res;
+        }
+
+        private static void CreateProxyMethod<T2>(MethodInfo oneMethod, TypeBuilder typeBuilder, FieldBuilder objectFieldBuilder)
+            where T2 : T
+        {
+            var methodParameterTypes = oneMethod.GetParameters().Select(k => k.ParameterType).ToArray();
+            var methodBuilder = typeBuilder.DefineMethod(oneMethod.Name, MethodAttributes.Public | MethodAttributes.Virtual,
+                CallingConventions.Standard, oneMethod.ReturnType, methodParameterTypes);
+            var methodIlo = methodBuilder.GetILGenerator();
+            methodIlo.Emit(OpCodes.Ldarg_0);
+            methodIlo.Emit(OpCodes.Ldfld, objectFieldBuilder);
+            for (int i = 0; i < methodParameterTypes.Length; i++)
+            {
+                methodIlo.Emit(OpCodes.Ldarg_S, i + 1);
+            }
+
+            methodIlo.Emit(OpCodes.Call, oneMethod);
+            methodIlo.Emit(OpCodes.Ret);
         }
     }
 }
