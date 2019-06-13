@@ -11,7 +11,7 @@ namespace TestConsole
             var core = new DefaultTest();
             var append = new DefaultAppendTest();
             var handler = new DefaultEnhancementHandler<ITest>();
-            var b = handler.EnhancementObjectAsync<ITest2>(core, append);
+            var b = handler.EnhancementObjectAsync<ITest2>(core, append).Result;
             var c = b.TestMethod1();
             var d = b.TestMethod2(3);
             var e = b.TestMethod3(string.Empty);
