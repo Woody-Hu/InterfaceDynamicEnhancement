@@ -11,3 +11,4 @@ namespace InterfaceDynamicEnhancement
         Task<T2> EnhancementObjectAsync<T2>(T coreObject, object appendObject) where T2 : T;
     }
 }
+
