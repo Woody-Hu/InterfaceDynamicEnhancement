@@ -11,31 +11,51 @@ namespace InterfaceDynamicEnhancement
 {
     public class DefaultEnhancementHandler<T> : IEnhancementHandler<T>
     {
-        private Lazy<IList<Assembly>> _assemblies = null;
+        private const string DynamicModuleName = "dynamicModule";
+
+        private Lazy<IList<Assembly>> _assemblies = new Lazy<IList<Assembly>>(() => AppDomain.CurrentDomain.GetAssemblies());
 
         private readonly ConcurrentDictionary<Type, object> _concurrentDictionaryObjects = new ConcurrentDictionary<Type, object>();
 
-        private static string _dynamicAssembly = Guid.NewGuid().ToString();
+        private readonly ConcurrentDictionary<string, Type> _concurrentDictionaryProxyTypes = new ConcurrentDictionary<string, Type>();
 
-        private const string _dynamicModuleName = "dynamicModule";
+        private readonly ConcurrentDictionary<Type, Type> _concurrentDictionaryAppendObjectTypes = new ConcurrentDictionary<Type, Type>();
 
-        private static Lazy<AssemblyBuilder> _assemblyBuilder = new Lazy<AssemblyBuilder>(()=> AssemblyBuilder.DefineDynamicAssembly(new AssemblyName(_dynamicAssembly) , AssemblyBuilderAccess.Run));
+        private readonly string _dynamicAssembly = Guid.NewGuid().ToString();
 
-        private static Lazy<ModuleBuilder> _moduleBuilder = new Lazy<ModuleBuilder>(()=> _assemblyBuilder.Value.DefineDynamicModule(_dynamicModuleName));
+        private readonly Lazy<ModuleBuilder> _moduleBuilder;
+
+        public DefaultEnhancementHandler()
+        {
+            var assemblyBuilder = new Lazy<AssemblyBuilder>(() => AssemblyBuilder.DefineDynamicAssembly(new AssemblyName(_dynamicAssembly), AssemblyBuilderAccess.Run));
+            _moduleBuilder = new Lazy<ModuleBuilder>(() => assemblyBuilder.Value.DefineDynamicModule(DynamicModuleName));
+        }
 
         public Task<T2> EnhancementObjectAsync<T2>(T coreObject, bool singleton) where T2 : T
         {
+            if (singleton && _concurrentDictionaryObjects.ContainsKey(typeof(T2)))
+            {
+                return Task.FromResult((T2) _concurrentDictionaryObjects[typeof(T2)]);
+            }
             throw new NotImplementedException();
         }
 
-        public T2 EnhancementObjectAsync<T2>(T coreObject, object appendObject) where T2 : T
+        public Task<T2> EnhancementObjectAsync<T2>(T coreObject, object appendObject) where T2 : T
+        {
+            var key = $"{typeof(T2).FullName};{appendObject.GetType().FullName}";
+            var t = _concurrentDictionaryProxyTypes.GetOrAdd(key, CreateProxyType<T2>(appendObject.GetType())) ;
+            var res = (T2)Activator.CreateInstance(t, coreObject, appendObject);
+            return Task.FromResult(res);
+        }
+
+        private Type CreateProxyType<T2> (Type appendType) where T2 : T
         {
             var typeName = typeof(T2).Name + Guid.NewGuid();
             var typeBuilder = _moduleBuilder.Value.DefineType(typeName, TypeAttributes.Class | TypeAttributes.Public, typeof(object));
             typeBuilder.AddInterfaceImplementation(typeof(T2));
             var coreObjectFiled = typeBuilder.DefineField("_coreObject", typeof(T), FieldAttributes.Private);
-            var appendObjectFiled = typeBuilder.DefineField("_appendObject", appendObject.GetType(), FieldAttributes.Private);
-            var constructorBuilder = typeBuilder.DefineConstructor(MethodAttributes.Public, CallingConventions.Standard, new Type[] {typeof(T), appendObject.GetType()});
+            var appendObjectFiled = typeBuilder.DefineField("_appendObject", appendType, FieldAttributes.Private);
+            var constructorBuilder = typeBuilder.DefineConstructor(MethodAttributes.Public, CallingConventions.Standard, new Type[] { typeof(T), appendType });
             var constructorIlo = constructorBuilder.GetILGenerator();
             constructorIlo.Emit(OpCodes.Ldarg_0);
             constructorIlo.Emit(OpCodes.Ldarg_1);
@@ -54,7 +74,7 @@ namespace InterfaceDynamicEnhancement
 
             foreach (var oneMethod in methodsOfT2)
             {
-                var appendObjectType = appendObject.GetType();
+                var appendObjectType = appendType;
                 var methodParameterTypes = oneMethod.GetParameters().Select(k => k.ParameterType).ToArray();
                 var appendObjectMethod = appendObjectType.GetMethod(oneMethod.Name, methodParameterTypes);
                 if (appendObjectMethod == null || appendObjectMethod.ReturnType != oneMethod.ReturnType)
@@ -77,11 +97,10 @@ namespace InterfaceDynamicEnhancement
             }
 
             var t = typeBuilder.CreateType();
-            var res = (T2)Activator.CreateInstance(t, coreObject, appendObject);
-            return res;
+            return t;
         }
 
-        private static void CreateProxyMethod<T2>(MethodInfo oneMethod, TypeBuilder typeBuilder, FieldBuilder objectFieldBuilder)
+        private void CreateProxyMethod<T2>(MethodInfo oneMethod, TypeBuilder typeBuilder, FieldBuilder objectFieldBuilder)
             where T2 : T
         {
             var methodParameterTypes = oneMethod.GetParameters().Select(k => k.ParameterType).ToArray();
