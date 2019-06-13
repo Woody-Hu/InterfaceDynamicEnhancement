@@ -7,5 +7,7 @@ namespace InterfaceDynamicEnhancement
     public interface IEnhancementHandler<T>
     {
         Task<T2> EnhancementObjectAsync<T2>(T coreObject, bool singleton) where T2 : T;
+
+        Task<T2> EnhancementObjectAsync<T2>(T coreObject, object appendObject) where T2 : T;
     }
 }
